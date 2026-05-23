@@ -8,8 +8,41 @@ api_key = os.getenv("groqkey")
 client = Groq(api_key=api_key)
 
 Jbrain = "memory.json"
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "open_file",
+            "description": "Open a file that is on the user's pc",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pathtofile": {
+                        "type" : "string",
+                        "description": "The name of the file or folder that it is in"
+                    }
+                },
+                "required": ["pathtofile"]
+            }
+        }
+    }
+]
+def openfile(pathtofile):
+    try:
+        os.startfile(pathtofile)
+        return f"Opened {pathtofile}"
+    except:
+        return f"Couldn't find {pathtofile}"
 
+available_functions = {
+    "open_file": openfile
+}
 
+def exec_toolcall(toolcall):
+    funcname = toolcall.function.name
+    func_to_call = available_functions[funcname]
+    func_args = json.loads(toolcall.function.arguments)
+    return func_to_call(**func_args)
 def load_memory():
     if os.path.exists(Jbrain):
         with open(Jbrain, "r") as f:
@@ -44,11 +77,29 @@ while True:
     messages.append({"role": "user", "content": us_input})
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages= messages
+        messages= messages,
+        tools=tools
     )
 
     reply = response.choices[0].message.content
-    messages.append({"role": "assistant", "content": reply})
+    if response.choices[0].message.tool_calls:
+        for tool_call in response.choices[0].message.tool_calls:
+            function_response = exec_toolcall(tool_call) 
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": tool_call.function.name,
+                "content": str(function_response)
+            })
+        final = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            tools=tools
+        )
+        reply = final.choices[0].message.content
+        messages.append({"role": "assistant", "content": reply})
+    else:
+        messages.append({"role": "assistant", "content": reply})
     print("JARVIS:", reply)
 save_memory(messages)
 
